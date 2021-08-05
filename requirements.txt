@@ -1,0 +1,8 @@
+numpy
+matplotlib
+pytorch >= 1.8
+torchvision >= 0.9
+opencv-python
+tqdm
+
+

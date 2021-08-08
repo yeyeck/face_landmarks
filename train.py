@@ -55,9 +55,9 @@ def val_loop(model, dataloader, loss_fn, epoch, epochs):
 def main(opt):
     
     # args
-    batch_size, img_size, epochs, workers, data, weights, lr, optimizer_type, name, loss_type, points, inner_enhance \
+    batch_size, img_size, epochs, workers, data, weights, lr, optimizer_type, name, loss_type, points, inner_enhance, datatype \
         = opt.batch_size, opt.img_size, opt.epochs, opt.workers, opt.data, opt.weights, opt.lr, opt.optimizer, \
-            opt.name, opt.loss, opt.points, opt.inner_enhance
+            opt.name, opt.loss, opt.points, opt.inner_enhance, opt.datatype
     
     # check and make the path if not exists
     save_to = os.path.join('runs/train', name)
@@ -71,8 +71,8 @@ def main(opt):
     print(f'All results will be saved in {save_to}')
 
     # data
-    train_loader = create_dataloader(data, batch_size=batch_size, workers=workers, img_size=img_size, train=True)
-    val_loader = create_dataloader(data, batch_size=batch_size, workers=workers, img_size=img_size, train=False)
+    train_loader = create_dataloader(data, batch_size=batch_size, workers=workers, img_size=img_size, train=True, points=points, datatype=datatype)
+    val_loader = create_dataloader(data, batch_size=batch_size, workers=workers, img_size=img_size, train=False, points=points, datatype=datatype)
 
     # model
     if weights and weights != '':
@@ -127,7 +127,8 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--data', type=str, default='../wflw', help='data for training')
     parser.add_argument('--loss', type=str, default='WING', help='Distance type to caculate loss: MSE, L1 or WING')
-    parser.add_argument('--points', type=int, default=98, help='batch-size')
+    parser.add_argument('--datatype', type=str, default='CROP', help='type of dataset')
+    parser.add_argument('--points', type=int, default=68, help='batch-size')
     parser.add_argument('--lr', type=float, default=0.01, help='data for training')
     parser.add_argument('--weights', type=str, default='', help='data for training')
     parser.add_argument('--batch-size', type=int, default=256, help='batch-size')

@@ -8,7 +8,7 @@ def plot_points(img, points):
     count = 0
     for point in points:
         cv2.circle(img, (int(point[0]), int(point[1])), 0, (0, 255, 0), 3)
-        # cv2.putText(img, str(count), (int(point[0]), int(point[1])), cv2.FONT_HERSHEY_COMPLEX, 1, (0, 255, 0), 1)
+        # cv2.putText(img, str(count), (int(point[0]), int(point[1])), cv2.FONT_HERSHEY_SIMPLEX, 0.3, (0, 0, 255), 1)
         count += 1
     return img
 

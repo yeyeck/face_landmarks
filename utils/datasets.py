@@ -1,6 +1,7 @@
 import glob, os, cv2, random, math
 import numpy as np
-from torch.utils.data import Dataset, DataLoader
+from torch.utils import data
+from torch.utils.data import Dataset, DataLoader, dataset
 import torch
 from torchvision import transforms
 # from utils.pose import calculate_pitch_yaw_roll
@@ -62,13 +63,19 @@ class RandomEarse(object):
 
 
 class RandomHorizontalFlip(object):
-    def __init__(self, p=0.5):
+    def __init__(self, p=0.5, points=98):
         self.p = p
+        if points == 98:
+            self.ids = [32,31,30,29,28,27,26,25,24,23,22,21,20,19,18,17,16,15,14,13,12,11,10,9,8,7,6,5,4,3,2,1,0,46,45,44,43,42,50,49,48,47,37,36,35,34,33,41,40,39,38,51,
+               52,53,54,59,58,57,56,55,72,71,70,69,68,75,74,73,64,63,62,61,60,67,66,65,82,81,80,79,78,77,76,87,86,85,84,83,92,91,90,89,88,95,94,93,97,96]
+        if points == 68:
+            self.ids = [16, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0, 26, 25, 24, 23, 22, 21, 20, 19, 18, 17, 27, 28, 29, 30, 35, 34, 33, 32, 31, 
+            45, 44, 43, 42, 47, 46, 39, 38, 37, 36, 41, 40, 54, 53, 52, 51, 50, 49, 48, 59, 58, 57, 56, 55, 64, 63, 62, 61, 60, 67, 66, 65]
     
     def __call__(self, img, label=None):
         if random.random() < self.p:
             img = cv2.flip(img, 1)
-            if label.any():
+            if label:
                 for i in range(len(label)):
                     if i % 2 == 0:
                         label[i] = 1 - label[i]
@@ -77,10 +84,9 @@ class RandomHorizontalFlip(object):
         return img, label
 
     def _flip(self, points):
-        idx = [32,31,30,29,28,27,26,25,24,23,22,21,20,19,18,17,16,15,14,13,12,11,10,9,8,7,6,5,4,3,2,1,0,46,45,44,43,42,50,49,48,47,37,36,35,34,33,41,40,39,38,51,
-               52,53,54,59,58,57,56,55,72,71,70,69,68,75,74,73,64,63,62,61,60,67,66,65,82,81,80,79,78,77,76,87,86,85,84,83,92,91,90,89,88,95,94,93,97,96]
+        
         points_ = []
-        for i in idx:
+        for i in self.ids:
             points_.extend(points[i])
         return points_
 
@@ -100,6 +106,57 @@ class RandomLinear(object):
             beta = self.beta_min + self.pb * random.randint(0, 10)
             img = np.uint8(np.clip(img * alpha + beta, 0, 255))
         return img, label
+
+
+class FaceLandmarksDataset(Dataset):
+    def __init__(self, img_src, labels_src, transform=None):
+        super(FaceLandmarksDataset, self).__init__()
+        self.img_src = img_src
+        self.labels_src = labels_src
+        self.imgs = []
+        for t in ['**.jpg', '**.png', '**/**.jpg', '**/**.png']:
+            self.imgs.extend(glob.glob(os.path.join(self.img_src, t)))
+        for img_pth in self.imgs:
+            img_name = img_pth.split(os.path.sep)[-1].split('.')[0]
+            label_pth = os.path.join(self.labels_src, img_name + '.txt')
+            if not os.path.exists(label_pth):
+                self.imgs.remove(img_pth)
+                print(f'Can not find label {label_pth} for img {img_pth}')
+        self.transform = transform
+
+
+    def __len__(self):
+        return len(self.imgs)
+
+    def __getitem__(self, idx):
+        img_pth = self.imgs[idx]
+        img_name = img_pth.split(os.path.sep)[-1].split('.')[0]
+        label_pth = os.path.join(self.labels_src, img_name + '.txt')
+        # label
+        landmarks = self.__read_label(label_pth)
+        # img
+        img = cv2.imread(img_pth)
+        h, w, _ = img.shape
+        # transform
+        if self.transform:
+            img, landmarks = self.transform(img, landmarks)
+
+        
+        landmarks_ = np.float32(landmarks).reshape(-1, 2) * np.array([w, h])
+        TRACKED_POINTS = [17, 21, 22, 26, 36, 39, 42, 45, 31, 35, 48, 54, 57, 8]
+        landmark2D = []
+        for id in TRACKED_POINTS:
+            landmark2D.append(landmarks_[id])
+        pitch, yaw, roll = calculate_pitch_yaw_roll(np.float32(landmark2D), w, h)
+        pose = np.float32([pitch, yaw, roll]) * np.pi / 180
+        label = np.concatenate((landmarks, pose))
+        return img_pth, img, torch.Tensor(label)
+    
+    def __read_label(self, label_pth):
+        with open(label_pth, 'r') as f:
+            line = f.readline()
+            data = [float(i) for i in line.split(' ')]
+            return data
 
 
 
@@ -170,17 +227,79 @@ class WFLWDataset(Dataset):
         label = np.concatenate((landmarks, pose, status))
         return img_name, img, label
 
+class W300Dataset(Dataset):
+    def __init__(self, src, transform, train=False):
+        super(W300Dataset, self).__init__()
+        imgs_pth = []
+        self.data = []
+        self.transform = transform
+        if train:
+            src = os.path.join(src, 'train')
+        else:
+            src = os.path.join(src, 'val')
+        for t in ['**.jpg', '**.png', '**/**.jpg', '**/**.png']:
+            imgs_pth.extend(glob.glob(os.path.join(src, t)))
+        for pth in self.data:
+            label_pth = os.path.splitext(pth)[0] + '.pts'
+            if not os.path.exists(label_pth):
+                self.data.remove(pth)
+                print(f'Can not find labels for {pth}')
+                continue
+            labels = self.__read_pts(label_pth)
+            self.data.append((pth, labels))
+        
+    def __read_pts(self, pth):
+        points = []
+        with open(pth, 'r') as f:
+            f.readline()    # ignore version
+            nums = int(f.readline().strip().split(' ')[-1])     # num of points
+            f.readline()    # ignore bracket
+            for i in range(nums):
+                line = f.readline().strip()
+                pt = [float(s) for s in line.split(' ')]
+                points.append(pt)
+        return np.float32(points).reshape(-1, 2)
+
+    def __len__(self):
+        return len(self.data)
+    
+    def __getitem__(self, idx):
+        img_pth, landmarks = self.data[idx]
+        # img
+        img = cv2.imread(img_pth)
+        h, w, _ = img.shape
+        # crop face
+        x1, y1, x2, y2 = face_bbox(landmarks, w, h)
+        img = img[y1:y2, x1:x2, :]
+        face_h, face_w, _ = img.shape
+        # landmarks
+        landmarks = landmarks - np.float32([x1, y1])
+        landmarks = landmarks / np.float32([face_w, face_h])
+        landmarks = landmarks.reshape(196)
+
+        # transform
+        if self.transform:
+            img, landmarks = self.transform(img, landmarks)
+
+        landmarks_ = np.float32(landmarks).reshape(-1, 2) * np.array([face_w, face_h])
+        TRACKED_POINTS = [17, 21, 22, 26, 36, 39, 42, 45, 31, 35, 48, 54, 57, 8]
+        landmark2D = []
+        for id in TRACKED_POINTS:
+            landmark2D.append(landmarks_[id])
+        pitch, yaw, roll = calculate_pitch_yaw_roll(np.float32(landmark2D), face_w, face_h)
+        pose = np.float32([pitch, yaw, roll]) * np.pi / 180
+        label = np.concatenate((landmarks, pose))
+        return img_pth, img, label
+
+
+
 
 def calculate_pitch_yaw_roll(landmarks_2D ,cam_w=256, cam_h=256,radians=False):
-    """ Return the the pitch  yaw and roll angles associated with the input image.
-    @param radians When True it returns the angle in radians, otherwise in degrees.
-    """
     c_x = cam_w/2
     c_y = cam_h/2
     f_x = c_x / np.tan(60/2 * np.pi / 180)
     f_y = f_x
 
-    #Estimated camera matrix values.
     camera_matrix = np.float32([[f_x, 0.0, c_x],
                                 [0.0, f_y, c_y],
                                 [0.0, 0.0, 1.0]])
@@ -191,11 +310,6 @@ def calculate_pitch_yaw_roll(landmarks_2D ,cam_w=256, cam_h=256,radians=False):
     # TRACKED_POINTS = [17, 21, 22, 26, 36, 39, 42, 45, 31, 35, 48, 54, 57, 8]
     #wflw(98 landmark) trached points
     # TRACKED_POINTS = [33, 38, 50, 46, 60, 64, 68, 72, 55, 59, 76, 82, 85, 16]
-    #X-Y-Z with X pointing forward and Y on the left and Z up.
-    #The X-Y-Z coordinates used are like the standard
-    # coordinates of ROS (robotic operative system)
-    #OpenCV uses the reference usually used in computer vision:
-    #X points to the right, Y down, Z to the front
     LEFT_EYEBROW_LEFT  = [6.825897, 6.760612, 4.402142]
     LEFT_EYEBROW_RIGHT = [1.330353, 7.122144, 6.903745]
     RIGHT_EYEBROW_LEFT = [-1.330353, 7.122144, 6.903745]
@@ -226,53 +340,22 @@ def calculate_pitch_yaw_roll(landmarks_2D ,cam_w=256, cam_h=256,radians=False):
                                 LOWER_LIP,
                                 CHIN])
 
-    #Return the 2D position of our landmarks
     assert landmarks_2D is not None ,'landmarks_2D is None'
     
 
     landmarks_2D = np.asarray(landmarks_2D,dtype=np.float32).reshape(-1,2)
-    #Applying the PnP solver to find the 3D pose
-    #of the head from the 2D position of the
-    #landmarks.
-    #retval - bool
-    #rvec - Output rotation vector that, together with tvec, brings
-    #points from the world coordinate system to the camera coordinate system.
-    #tvec - Output translation vector. It is the position of the world origin (SELLION) in camera co-ords
     retval, rvec, tvec = cv2.solvePnP(landmarks_3D,
                                       landmarks_2D,
                                       camera_matrix,
                                       camera_distortion)
-
-    #Get as input the rotational vector
-    #Return a rotational matrix
     rmat, _ = cv2.Rodrigues(rvec)
     pose_mat = cv2.hconcat((rmat,tvec))
 
-    #euler_angles contain (pitch, yaw, roll)
-    # euler_angles = cv2.DecomposeProjectionMatrix(projMatrix=rmat, cameraMatrix=self.camera_matrix, rotMatrix, transVect, rotMatrX=None, rotMatrY=None, rotMatrZ=None)
     _, _, _, _, _, _,euler_angles = cv2.decomposeProjectionMatrix(pose_mat)
     pitch,yaw,roll =map(lambda temp:temp[0],euler_angles)
     return pitch,yaw,roll
 
-    # head_pose = [ rmat[0,0], rmat[0,1], rmat[0,2], tvec[0],
-
-                   # rmat[1,0], rmat[1,1], rmat[1,2], tvec[1],
-
-                   # rmat[2,0], rmat[2,1], rmat[2,2], tvec[2],
-
-                         # 0.0,      0.0,        0.0,    1.0 ]
-
-    #print(head_pose) #TODO remove this line
-
-    # return self.rotationMatrixToEulerAngles(rmat)
-# Calculates rotation matrix to euler angles
-# The result is the same as MATLAB except the order
-# of the euler angles ( x and z are swapped ).
-
-def rotationMatrixToEulerAngles(R) :
-    #assert(isRotationMatrix(R))
-    #To prevent the Gimbal Lock it is possible to use
-    #a threshold of 1e-6 for discrimination
+def rotationMatrixToEulerAngles(R):
     sy = math.sqrt(R[0,0] * R[0,0] +  R[1,0] * R[1,0])
 
     singular = sy < 1e-6
@@ -287,12 +370,12 @@ def rotationMatrixToEulerAngles(R) :
     return np.array([x, y, z])
 
 
-def create_dataloader(src, batch_size=256, workers=0, img_size=128, train=False, datatype='WFLW'):
+def create_dataloader(src, batch_size=256, workers=0, img_size=128, train=False, points=98, datatype='WFLW'):
     if train:
         trans = [
             Resize(size=(img_size, img_size)),
             RandomLinear(),
-            RandomHorizontalFlip(),
+            RandomHorizontalFlip(p=0.5, points=points),
             RandomEarse(p=0.5),
             Normalize()
         ]
@@ -304,4 +387,18 @@ def create_dataloader(src, batch_size=256, workers=0, img_size=128, train=False,
     transform = Transform(trans)
     if datatype == 'WFLW':
         dataset = WFLWDataset(root=src, train=train, transform=transform)
+    if datatype == 'CROP':
+        if train:
+            img_src, label_src = os.path.join(src, 'images', 'train'), os.path.join(src, 'labels', 'train')
+        else:
+            img_src, label_src = os.path.join(src, 'images', 'val'), os.path.join(src, 'labels', 'val')
+        dataset = FaceLandmarksDataset(img_src, label_src, transform=transform)
     return DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=workers)
+
+
+
+if __name__ == '__main__':
+    ids = [16, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0, 26, 25, 24, 23, 22, 21, 20, 19, 18, 17, 27, 28, 29, 30, 35, 34, 33, 32, 31, 
+            45, 44, 43, 42, 47, 46, 39, 38, 37, 36, 41, 40, 54, 53, 52, 51, 50, 49, 48, 59, 58, 57, 56, 55, 64, 63, 62, 61, 60, 67, 66, 65]
+    for i in range(68):
+        print(i+1, ids[i]+1)

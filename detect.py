@@ -44,7 +44,7 @@ if __name__ == '__main__':
     # model = torch.load('runs/train/exp/best.pth', map_location='cpu')
 
     with torch.no_grad():
-        detector = FacePointsDetector('runs/train/wing_2/best.pth')
+        detector = FacePointsDetector('runs/train/mse68/best.pth')
         for pth in glob.glob('../test/**.png'):
             input = cv2.imread(pth)
             img = cv2.imread(pth)

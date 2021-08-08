@@ -33,6 +33,13 @@ class PFLDLoss(nn.Module):
         super(PFLDLoss, self).__init__()
          
         self.points = points
+        if self.points == 98:
+            self.inner_start = 102
+            self.eye = (120, 152)
+        if self.points == 68:
+            self.inner_start = 54
+            self.eye = (72, 96)
+
         if dtype == 'MSE':
             self.distance = nn.MSELoss()
         elif dtype == 'WING':
@@ -49,7 +56,8 @@ class PFLDLoss(nn.Module):
         
         loss = loss_pts.mean() + loss_pose.mean()
         if self.inner_enhance:
-            loss_inner = self.distance(pred[:, 102:pt_end], target[:, 102:pt_end])
-            loss_eye = self.distance(pred[:, 120:152], target[:, 120:152]) * 0.5
+            loss_inner = self.distance(pred[:, self.inner_start:pt_end], target[:, self.inner_start:pt_end])
+            loss_eye = self.distance(pred[:, self.eye[0]:self.eye[1]], target[:, self.eye[0]:self.eye[1]]) * 0.5
             loss += loss_inner.mean() + loss_eye.mean()
+            loss += loss_inner.mean()
         return loss 
